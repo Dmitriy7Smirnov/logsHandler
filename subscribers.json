@@ -1,0 +1,22 @@
+{
+  "subscriptions": [
+    { 
+        "who": "max",
+        "app": "app1",
+        "component": "server",
+        "branch": "branch0",
+        "version": 1,
+        "level": 2,
+        "threshold": 5
+     },
+     { 
+        "who": "dima",
+        "app": "app2",
+        "component": "client",
+        "branch": "branch1",
+        "version": 2,
+        "level": 3,
+        "threshold": 10
+     }
+  ]
+}
