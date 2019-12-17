@@ -4,18 +4,79 @@ defmodule SubscriberHandler do
   # Imports only from/2 of Ecto.Query
 import Ecto.Query, only: [from: 2]
 
-
-
   def start_link(state) do
-    IO.inspect "Handler here"
-    IO.inspect state
+    # IO.inspect "Handler here"
+    # IO.inspect state
     genserver_name = Map.get(state, "who") |> String.to_atom()
-    IO.inspect genserver_name
+    # IO.inspect genserver_name
     GenServer.start_link(__MODULE__, state, name: genserver_name)
   end
 
   @impl true
   def init(state) do
+    subscriber = Map.get(state, "who")
+    create_table(String.to_atom(subscriber))
+    state_struct = convert_state_struct(state)
+    max_id =  case get_max_id() do
+      x when is_integer(x) -> x
+      _smth -> 0
+    end
+    :erlang.send_after(1000, self(), :query_and_save)
+    {:ok, %Log.State{state_struct | get_from_id: max_id}}
+  end
+
+  @impl true
+  def handle_call(:stop_msg, _from, %Log.State{subscriber: subscriber, threshold: threshold} = curr_state) do
+    query_and_save(%{curr_state | times: threshold - 1})
+    IO.inspect(subscriber, label: "HANDLE CALL: YOU UNSUSCRIBRED SUCCESSFULLY ")
+    {:reply, :reply_to_sender, curr_state}
+  end
+
+  @impl true
+  def handle_cast(new_state_msg, %Log.State{subscriber: subscriber, threshold: threshold} = curr_state) do
+    query_and_save(%{curr_state | times: threshold - 1})
+    IO.inspect(subscriber, label: "HANDLE CAST: YOU CHANGED SUBSCRIPTION FOR ")
+    new_state_struct = convert_state_struct(new_state_msg)
+    IO.inspect new_state_struct
+    {:noreply, new_state_struct}
+  end
+
+  @impl true
+  def handle_info(:query_and_save, state) do
+    IO.puts "I im here HANDLER"
+     state1 = query_and_save(state)
+     :erlang.send_after(5000, self(), :query_and_save)
+     {:noreply, state1}
+  end
+
+  defp query_and_save(%Log.State{app: app, component: _component, branch: _branch, version: _version, level: _level, get_from_id: get_from_id, subscriber: subscriber, threshold: threshold, times: times} =  state) do
+    data_from_postgres_with_id = get_from_postgres(get_from_id, app)
+    get_last_id = case data_from_postgres_with_id do
+      [head_map | _tail_maps] -> Map.get(head_map, :id)
+      [] -> get_from_id
+    end
+    data_from_postgres_without_ids = Enum.map(data_from_postgres_with_id, &Map.delete(&1, :id))
+    ets_update(String.to_atom(subscriber), data_from_postgres_without_ids, [])
+      |> Enum.each(&notify_subscriber_about_new_event(subscriber, &1))
+
+     next_times = case times + 1 do
+       ^threshold ->
+         dump_all_data_to_user(subscriber)
+         0
+       x -> x
+     end
+
+     %{state | get_from_id: get_last_id, times: next_times}
+  end
+
+  defp dump_all_data_to_user(subscriber) do
+    ms =  [{{:"$1",:"$2"},[{:>,:"$2", 1}],[{{:"$1",:"$2"}}]}]
+    all_logs = :ets.select(String.to_atom(subscriber), ms)
+    Enum.each(all_logs, &notify_subscriber_about_event(subscriber , &1));
+    :ets.delete_all_objects(String.to_atom(subscriber))
+  end
+
+  defp convert_state_struct(state) do
     get_from_id = get_max_id()
     app = Map.get(state, "app")
     component = Map.get(state, "component")
@@ -24,43 +85,7 @@ import Ecto.Query, only: [from: 2]
     level = Map.get(state, "level")
     subscriber = Map.get(state, "who")
     threshold = Map.get(state, "threshold")
-    create_table(String.to_atom(subscriber))
-    state_struct = %Log.State{app: app, component: component, branch: branch, version: version, level: level, get_from_id: get_from_id, subscriber: subscriber, threshold: threshold}
-    :erlang.send_after(1000, self(), :query_and_save)
-    {:ok, state_struct}
-  end
-
-  @impl true
-  def handle_call(msg, _from, state) do
-    {:reply, state, msg}
-  end
-
-  @impl true
-  def handle_cast(_msg, state) do
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info(:query_and_save, %Log.State{app: app, component: _component, branch: _branch, version: _version, level: _level, get_from_id: get_from_id, subscriber: subscriber, threshold: threshold, times: times} =  state) do
-    IO.puts "I im here HANDLER"
-    get_to_id = get_max_id()
-    data_from_postgres = get_from_postgres(get_from_id, get_to_id, app)
-    new_logs_list = ets_update(String.to_atom(subscriber), data_from_postgres, [])
-    Enum.each(new_logs_list, &notify_subscriber_about_new_event(subscriber, &1))
-
-     next_times = case times + 1 do
-       ^threshold ->
-         ms =  [{{:"$1",:"$2"},[{:>,:"$2", 1}],[{{:"$1",:"$2"}}]}]
-         all_logs = :ets.select(String.to_atom(subscriber), ms)
-         Enum.each(all_logs, &notify_subscriber_about_event(subscriber , &1));
-         :ets.delete_all_objects(String.to_atom(subscriber))
-         0
-       x -> x
-     end
-
-     state1 = %{state | get_from_id: get_to_id, times: next_times}
-     :erlang.send_after(5000, self(), :query_and_save)
-     {:noreply, state1}
+     %Log.State{app: app, component: component, branch: branch, version: version, level: level, get_from_id: get_from_id, subscriber: subscriber, threshold: threshold}
   end
 
   defp get_max_id() do
@@ -70,10 +95,11 @@ import Ecto.Query, only: [from: 2]
     max_id
   end
 
-  defp get_from_postgres(from_id, to_id, app) do
+  defp get_from_postgres(from_id, app) do
     query = from logs in "logs",
-    where: logs.id > ^from_id and logs.id <= ^to_id and logs.app == ^app,
-    select: [:app, :level, :msg]
+    where: logs.id > ^from_id and logs.app == ^app,
+    select: [:id, :app, :level, :msg],
+    order_by: [desc: logs.id]
     Logs.Repo.all(query)
   end
 
