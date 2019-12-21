@@ -2,7 +2,7 @@ defmodule SubscriberManager do
   use GenServer
 
   @ets_name :subscriber_manager
-  @subscriber_state_key "subscriber_state_key"
+  @curr_subscribers_keys "curr_subscribers_keys"
 
   def start_link(state) do
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
@@ -12,7 +12,7 @@ defmodule SubscriberManager do
   def init(_state) do
     create_table()
     send(self(), :subscribers_start)
-    {:ok, %{name: 1}}
+    {:ok, %{}}
   end
 
   @impl true
@@ -27,12 +27,9 @@ defmodule SubscriberManager do
 
   @impl true
   def handle_info(:subscribers_start, state) do
-    {:ok, result} = File.read("subscribers.json")
-    subscribers = result
-      |> String.replace("\r", "")
-      |> String.replace("\n", "")
-      |> Jason.decode!()
-      |> Map.get("subscriptions")
+    {:ok, file_data} = File.read("subscribers.json")
+    %{"subscriptions" => subscribers} = Jason.decode!(file_data)
+
 
     {subs_for_create, subs_for_update, subs_for_delete_names} = ets_update(subscribers, {[], [], []})
       IO.inspect "SUBSCRIBERS START HERE"
@@ -41,7 +38,7 @@ defmodule SubscriberManager do
       IO.inspect(subs_for_delete_names, label: "for delete")
 
     create_subs_processes(subs_for_create)
-    updata_subs(subs_for_update)
+    update_subs(subs_for_update)
     delete_subs(subs_for_delete_names)
 
     :erlang.send_after(10000, self(), :subscribers_start)
@@ -50,27 +47,24 @@ defmodule SubscriberManager do
 
   defp create_subs_processes(subs_for_create) do
     Enum.each(subs_for_create, &DynamicSupervisor.start_child(MyApp.DynamicSupervisor, {SubscriberHandler, &1}))
-    subs_for_create
   end
 
-  defp updata_subs(subs_for_update) do
-    Enum.each(subs_for_update, &GenServer.cast(&1 |> Map.get("who") |> String.to_atom(), &1))
+  defp update_subs(subs_for_update) do
+    Enum.each(subs_for_update, &GenServer.cast(String.to_atom(Map.get(&1, "who")), &1))
   end
-
-
 
   defp delete_subs(subs_for_delete_names) do
     IO.inspect(subs_for_delete_names, label: "DELETE SUBS")
     subs_for_delete_names
-      |> Enum.map(&(&1 |> String.to_atom()))
+      |> Enum.map(&(String.to_atom(&1)))
       |> Enum.map(&GenServer.call(&1, :stop_msg))
     subs_for_delete_names
-      |> Enum.each(&DynamicSupervisor.terminate_child(MyApp.DynamicSupervisor, Process.whereis(&1 |> String.to_atom())))
+      |> Enum.each(&DynamicSupervisor.terminate_child(MyApp.DynamicSupervisor, Process.whereis(String.to_atom(&1))))
     subs_for_delete_names
       |> Enum.each(&:ets.delete(@ets_name, &1))
-    case :ets.lookup(@ets_name, @subscriber_state_key) do
-      [{@subscriber_state_key, all_prev_subs_names}] ->
-        :ets.insert(@ets_name, {@subscriber_state_key, all_prev_subs_names -- subs_for_delete_names})
+    case :ets.lookup(@ets_name, @curr_subscribers_keys) do
+      [{@curr_subscribers_keys, all_prev_subs_names}] ->
+        :ets.insert(@ets_name, {@curr_subscribers_keys, all_prev_subs_names -- subs_for_delete_names})
       [] ->
         :ignore
     end
@@ -81,14 +75,8 @@ defmodule SubscriberManager do
   end
 
   defp ets_update([], {subs_for_create, subs_for_update, all_current_subs_names}) do
-    subs_for_delete_names = case :ets.lookup(@ets_name, @subscriber_state_key) do
-      [{@subscriber_state_key, all_prev_subs_names}] ->
-        :ets.insert(@ets_name, {@subscriber_state_key, all_current_subs_names})
-        all_prev_subs_names -- all_current_subs_names
-      [] ->
-        :ets.insert(@ets_name, {@subscriber_state_key, all_current_subs_names})
-        []
-    end
+    subs_for_delete_names = :ets.lookup(@ets_name, @curr_subscribers_keys) -- all_current_subs_names
+    :ets.insert(@ets_name, {@curr_subscribers_keys, all_current_subs_names})
     {subs_for_create, subs_for_update, subs_for_delete_names}
   end
 

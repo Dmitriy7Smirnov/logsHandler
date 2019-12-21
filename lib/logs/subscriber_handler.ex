@@ -17,12 +17,8 @@ import Ecto.Query, only: [from: 2]
     subscriber = Map.get(state, "who")
     create_table(String.to_atom(subscriber))
     state_struct = convert_state_struct(state)
-    max_id =  case get_max_id() do
-      x when is_integer(x) -> x
-      _smth -> 0
-    end
     :erlang.send_after(1000, self(), :query_and_save)
-    {:ok, %Log.State{state_struct | get_from_id: max_id}}
+    {:ok, %Log.State{state_struct | get_from_id: get_max_id()}}
   end
 
   @impl true
@@ -55,8 +51,8 @@ import Ecto.Query, only: [from: 2]
       [head_map | _tail_maps] -> Map.get(head_map, :id)
       [] -> get_from_id
     end
-    data_from_postgres_without_ids = Enum.map(data_from_postgres_with_id, &Map.delete(&1, :id))
-    ets_update(String.to_atom(subscriber), data_from_postgres_without_ids, [])
+    Enum.map(data_from_postgres_with_id, &Map.delete(&1, :id))
+      |> List.foldl([], &ets_update(String.to_atom(subscriber), &1, &2))
       |> Enum.each(&notify_subscriber_about_new_event(subscriber, &1))
 
      next_times = case times + 1 do
@@ -91,8 +87,10 @@ import Ecto.Query, only: [from: 2]
   defp get_max_id() do
     query = from logs in "logs",
     select: max(logs.id)
-    [max_id] = Logs.Repo.all(query)
-    max_id
+    case Logs.Repo.all(query) do
+      [max_id] when is_integer(max_id) -> max_id
+      _smth -> 0
+    end
   end
 
   defp get_from_postgres(from_id, app) do
@@ -124,21 +122,15 @@ import Ecto.Query, only: [from: 2]
     :ets.new(table_name, [:set, :public, :named_table])
   end
 
-
-  defp ets_update(_ets_name, [], new_logs_list) do
-    new_logs_list
-  end
-
-  defp ets_update(ets_name, [head_key | tail], new_logs_list) do
-    new_logs_list1 = case :ets.lookup(ets_name, head_key) do
-      [{head_key, repetitions}] ->
-        :ets.insert(ets_name, {head_key, repetitions + 1})
-        new_logs_list
+  defp ets_update(ets_name, log_key, new_logs_acc) do
+    case :ets.lookup(ets_name, log_key) do
+      [{log_key, repetitions}] ->
+        :ets.insert(ets_name, {log_key, repetitions + 1})
+        new_logs_acc
       [] ->
-        :ets.insert(ets_name, {head_key, 1})
-        [head_key | new_logs_list]
+        :ets.insert(ets_name, {log_key, 1})
+        [log_key | new_logs_acc]
     end
-    ets_update(ets_name, tail, new_logs_list1)
   end
 
 end
