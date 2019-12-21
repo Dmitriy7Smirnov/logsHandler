@@ -17,7 +17,7 @@ import Ecto.Query, only: [from: 2]
     subscriber = Map.get(state, "who")
     create_table(String.to_atom(subscriber))
     state_struct = convert_state_struct(state)
-    :erlang.send_after(1000, self(), :query_and_save)
+    # :erlang.send_after(1000, self(), :query_and_save)
     {:ok, %Log.State{state_struct | get_from_id: get_max_id()}}
   end
 

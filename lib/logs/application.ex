@@ -9,7 +9,7 @@ defmodule Logs.Application do
     children = [
       Logs.Repo,
       {DynamicSupervisor, strategy: :one_for_one, name: MyApp.DynamicSupervisor},
-      DBFiller,
+      # DBFiller,
       SubscriberManager
       # Starts a worker by calling: Logs.Worker.start_link(arg)
       # {Logs.Worker, arg}

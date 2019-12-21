@@ -30,14 +30,16 @@ defmodule SubscriberManager do
     {:ok, file_data} = File.read("subscribers.json")
     %{"subscriptions" => subscribers} = Jason.decode!(file_data)
 
-
-    {subs_for_create, subs_for_update, subs_for_delete_names} = ets_update(subscribers, {[], [], []})
+    {subs_for_create, subs_for_update, all_current_subs_names} = List.foldl(subscribers, {[], [], []}, &ets_update(&1, &2))
+    subs_for_delete_names = get_subs_for_delete_names(all_current_subs_names)
       IO.inspect "SUBSCRIBERS START HERE"
       IO.inspect(subs_for_create, label: "for create")
       IO.inspect(subs_for_update, label: "for update")
       IO.inspect(subs_for_delete_names, label: "for delete")
 
     create_subs_processes(subs_for_create)
+    # children = DynamicSupervisor.which_children(MyApp.DynamicSupervisor)
+    # IO.inspect(children, label: "SUPREVISOR'S CHILDREN")
     update_subs(subs_for_update)
     delete_subs(subs_for_delete_names)
 
@@ -74,26 +76,25 @@ defmodule SubscriberManager do
     :ets.new(@ets_name, [:set, :private, :named_table])
   end
 
-  defp ets_update([], {subs_for_create, subs_for_update, all_current_subs_names}) do
+  defp get_subs_for_delete_names(all_current_subs_names) do
     subs_for_delete_names = :ets.lookup(@ets_name, @curr_subscribers_keys) -- all_current_subs_names
     :ets.insert(@ets_name, {@curr_subscribers_keys, all_current_subs_names})
-    {subs_for_create, subs_for_update, subs_for_delete_names}
+    subs_for_delete_names
   end
 
-  defp ets_update([sub_param | subs_params], {subs_for_create, subs_for_update, all_current_subs_names}) do
-    subscriber = Map.get(sub_param, "who")
-    {new_subs_for_create, new_subs_for_update, new_all_current_subs_names} = case :ets.lookup(@ets_name, subscriber) do
-      [{^subscriber, ^sub_param}] ->
+  defp ets_update(subscriber_struct, {subs_for_create, subs_for_update, all_current_subs_names}) do
+    subscriber = Map.get(subscriber_struct, "who")
+    case :ets.lookup(@ets_name, subscriber) do
+      [{^subscriber, ^subscriber_struct}] ->
         # data exists already
         {subs_for_create, subs_for_update, [subscriber | all_current_subs_names]}
       [{^subscriber, _old_sub_param}] ->
-        :ets.insert(@ets_name, {subscriber, sub_param})
-        {subs_for_create, [sub_param | subs_for_update], [subscriber | all_current_subs_names]}
+        :ets.insert(@ets_name, {subscriber, subscriber_struct})
+        {subs_for_create, [subscriber_struct | subs_for_update], [subscriber | all_current_subs_names]}
       [] ->
-        :ets.insert(@ets_name, {subscriber, sub_param})
-        {[sub_param | subs_for_create], subs_for_update, [subscriber | all_current_subs_names]}
+        :ets.insert(@ets_name, {subscriber, subscriber_struct})
+        {[subscriber_struct | subs_for_create], subs_for_update, [subscriber | all_current_subs_names]}
     end
-    ets_update(subs_params, {new_subs_for_create, new_subs_for_update, new_all_current_subs_names} )
   end
 
 end
