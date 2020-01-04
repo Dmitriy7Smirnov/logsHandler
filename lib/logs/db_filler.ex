@@ -1,6 +1,8 @@
 defmodule DBFiller do
   use GenServer
 
+  @delay 10
+
   def start_link(state) do
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
   end
@@ -25,7 +27,7 @@ defmodule DBFiller do
   def handle_info(:fill_db, state) do
     log = %Logs.Log{app: gen_app(), component: gen_component(), branch: gen_branch(), version: Enum.random(1..5), level: Enum.random(0..3), msg: gen_msg()}
     Logs.Repo.insert(log)
-    :erlang.send_after(10, self(), :fill_db)
+    :erlang.send_after(@delay, self(), :fill_db)
     {:noreply, state}
   end
 

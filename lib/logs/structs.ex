@@ -1,10 +1,3 @@
-defmodule Log.Levels do
-  defstruct debug: 0,
-    info: 1,
-    warning: 2,
-    error: 3
-end
-
 defmodule Log.State do
   defstruct app: "",
     component: "",
