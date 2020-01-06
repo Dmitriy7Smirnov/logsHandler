@@ -10,17 +10,7 @@ defmodule DBFiller do
   @impl true
   def init(_state) do
     send(self(), :fill_db)
-    {:ok, %{name: 1}}
-  end
-
-  @impl true
-  def handle_call(msg, _from, state) do
-    {:reply, state, msg}
-  end
-
-  @impl true
-  def handle_cast(_msg, state) do
-    {:noreply, state}
+    {:ok, %{}}
   end
 
   @impl true
@@ -67,5 +57,4 @@ defmodule DBFiller do
       5 -> "message5"
     end
   end
-
 end

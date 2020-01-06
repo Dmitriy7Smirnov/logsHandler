@@ -1,9 +1,9 @@
 defmodule SubscriberHandler do
   use GenServer
 
-  @update_msg :update_msg
-  @stop_msg :stop_msg
-  @query_and_save :query_and_save
+  @update_msg :update
+  @stop_msg :stop
+  @query_and_save_msg :query_and_save
   @delay 5000
 
 # Imports only from/2 of Ecto.Query
@@ -16,7 +16,7 @@ import Ecto.Query, only: [from: 2]
   @impl true
   def init(%Log.State{subscriber: table_name} = state) do
     :ets.new(table_name, [:set, :public, :named_table])
-    :erlang.send_after(@delay, self(), @query_and_save)
+    :erlang.send_after(@delay, self(), @query_and_save_msg)
     {:ok, %Log.State{state | get_from_id: get_max_id()}}
   end
 
@@ -34,9 +34,9 @@ import Ecto.Query, only: [from: 2]
   end
 
   @impl true
-  def handle_info(@query_and_save, state) do
+  def handle_info(@query_and_save_msg, state) do
     state1 = query_and_save(state)
-    :erlang.send_after(@delay, self(), @query_and_save)
+    :erlang.send_after(@delay, self(), @query_and_save_msg)
     {:noreply, state1}
   end
 
@@ -66,11 +66,11 @@ import Ecto.Query, only: [from: 2]
     get_to_id = get_max_id()
     get_logs(get_from_id, get_to_id, app)
       |> List.foldl([], &get_new_logs(subscriber, &1, &2))
-      |> Enum.each(&notify_subscriber_about_new_event(subscriber, &1))
+      |> Enum.each(&notify(subscriber, &1, 1))
 
     next_times = case times + 1 do
       ^threshold ->
-        dump_data(subscriber)
+        dump_logs(subscriber)
         0
       x -> x
     end
@@ -78,10 +78,10 @@ import Ecto.Query, only: [from: 2]
     %{state | get_from_id: get_to_id, times: next_times}
   end
 
-  defp dump_data(subscriber) do
+  defp dump_logs(subscriber) do
     ms =  [{{:"$1",:"$2"},[{:>,:"$2", 1}],[{{:"$1",:"$2"}}]}]
     all_logs = :ets.select(subscriber, ms)
-    Enum.each(all_logs, &notify_subscriber_about_event(subscriber , &1));
+    Enum.each(all_logs, fn {log, repetitions} -> notify(subscriber, log, repetitions) end);
     :ets.delete_all_objects(subscriber)
   end
 
@@ -103,28 +103,25 @@ import Ecto.Query, only: [from: 2]
     Logs.Repo.all(query)
   end
 
-  defp notify_subscriber_about_new_event(recipient, new_log) do
-    path_to_file = to_string(recipient)
-    {:ok, file} = File.open(path_to_file, [:append])
-    s = :io_lib.format("~p~n", [new_log])
-    IO.binwrite(file,  "new msg:    #{:erlang.iolist_to_binary(s)}")
-    File.close(file)
-  end
-
-  defp notify_subscriber_about_event(recipient, {log, repetitions}) do
-    path_to_file = to_string(recipient)
+  defp notify(subscriber, log, repetitions) do
+    path_to_file = to_string(subscriber)
     {:ok, file} = File.open(path_to_file, [:append])
     s = :io_lib.format("~p", [log])
-    IO.binwrite(file,  "#{:erlang.iolist_to_binary(s)}   repetitions = #{:erlang.integer_to_binary(repetitions)} \n")
+    case repetitions do
+      1 -> IO.binwrite(file,  "new msg:    #{:erlang.iolist_to_binary(s)} \n")
+      reps -> IO.binwrite(file,  "#{:erlang.iolist_to_binary(s)}   repetitions = #{:erlang.integer_to_binary(reps)} \n")
+    end
     File.close(file)
   end
 
   defp get_new_logs(ets_name, log_key, new_logs_acc) do
     case :ets.lookup(ets_name, log_key) do
+
       # log exist already
       [{log_key, repetitions}] ->
         :ets.insert(ets_name, {log_key, repetitions + 1})
         new_logs_acc
+
       # new log
       [] ->
         :ets.insert(ets_name, {log_key, 1})

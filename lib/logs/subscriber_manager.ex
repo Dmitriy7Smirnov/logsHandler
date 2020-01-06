@@ -1,11 +1,10 @@
 defmodule SubscriberManager do
   use GenServer
 
-  @ets_subs_structs :subscriber_structs
-  @ets_subs_names :subscriber_keys
+  @ets_subs :structs
+  @ets_subs_names :keys
   @curr_subscribers_key "curr_subscribers_key"
-  @deley 10000
-
+  @delay 10000
 
   def start_link(state) do
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
@@ -13,21 +12,11 @@ defmodule SubscriberManager do
 
   @impl true
   def init(_state) do
-    :ets.new(@ets_subs_structs, [:set, :private, :named_table])
+    :ets.new(@ets_subs, [:set, :private, :named_table])
     :ets.new(@ets_subs_names, [:set, :private, :named_table])
     :ets.insert(@ets_subs_names, {@curr_subscribers_key, []})
     send(self(), :subscribers_update)
     {:ok, %{}}
-  end
-
-  @impl true
-  def handle_call(msg, _from, state) do
-    {:reply, state, msg}
-  end
-
-  @impl true
-  def handle_cast(_msg, state) do
-    {:noreply, state}
   end
 
   @impl true
@@ -53,7 +42,7 @@ defmodule SubscriberManager do
     # delete subscribers
     Enum.each(subs_for_delete_names, &delete(&1))
 
-    :erlang.send_after(@deley, self(), :subscribers_update)
+    :erlang.send_after(@delay, self(), :subscribers_update)
     {:noreply, state}
   end
 
@@ -82,22 +71,26 @@ defmodule SubscriberManager do
   defp delete(subscriber) do
     SubscriberHandler.stop_sub(subscriber)
     DynamicSupervisor.terminate_child(MyApp.DynamicSupervisor, Process.whereis(subscriber))
-    :ets.delete(@ets_subs_structs, subscriber)
+    :ets.delete(@ets_subs, subscriber)
   end
 
+  # function for foldl: ets_update(subscriber_struct, acc)
   defp ets_update(subscriber_struct, {subs_for_create, subs_for_update, all_current_subs_names}) do
     subscriber = subscriber_struct.subscriber
-    case :ets.lookup(@ets_subs_structs, subscriber) do
+    case :ets.lookup(@ets_subs, subscriber) do
+
       # data exists already
       [{^subscriber, ^subscriber_struct}] ->
         {subs_for_create, subs_for_update, [subscriber | all_current_subs_names]}
+
       # data was changed
       [{^subscriber, _old_sub_param}] ->
-        :ets.insert(@ets_subs_structs, {subscriber, subscriber_struct})
+        :ets.insert(@ets_subs, {subscriber, subscriber_struct})
         {subs_for_create, [subscriber_struct | subs_for_update], [subscriber | all_current_subs_names]}
+
       # new data
       [] ->
-        :ets.insert(@ets_subs_structs, {subscriber, subscriber_struct})
+        :ets.insert(@ets_subs, {subscriber, subscriber_struct})
         {[subscriber_struct | subs_for_create], subs_for_update, [subscriber | all_current_subs_names]}
     end
   end

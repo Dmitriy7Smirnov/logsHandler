@@ -1,10 +1,10 @@
 import Config
 
 config :logs, Logs.Repo,
+  ecto_repos: [Logs.Repo],
   database: "logs_repo",
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
-  log: false
+  hostname: "localhost"
 
-  config :logs, ecto_repos: [Logs.Repo]
+config :logger, level: :info
