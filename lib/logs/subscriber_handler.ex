@@ -16,28 +16,31 @@ import Ecto.Query, only: [from: 2]
   @impl true
   def init(%Log.State{subscriber: table_name} = state) do
     :ets.new(table_name, [:set, :public, :named_table])
-    :erlang.send_after(@delay, self(), @query_and_save_msg)
-    {:ok, %Log.State{state | get_from_id: get_max_id()}}
+    timer_ref = :erlang.send_after(@delay, self(), @query_and_save_msg)
+    {:ok, %Log.State{state | get_from_id: get_max_id(), timer_ref: timer_ref}}
   end
 
   @impl true
-  def handle_call(@stop_msg, _from, %Log.State{threshold: threshold} = curr_state) do
+  def handle_call(@stop_msg, _from, %Log.State{threshold: threshold, timer_ref: timer_ref} = curr_state) do
+    :erlang.cancel_timer(timer_ref)
     query_and_save(%{curr_state | times: threshold - 1})
     {:reply, :ok, curr_state}
   end
 
   @impl true
-  def handle_cast({@update_msg, new_state_msg}, %Log.State{threshold: threshold} = curr_state) do
+  def handle_cast({@update_msg, new_state_msg}, %Log.State{threshold: threshold, timer_ref: timer_ref} = curr_state) do
+    :erlang.cancel_timer(timer_ref)
     max_id = get_max_id()
     query_and_save(%Log.State{curr_state | times: threshold - 1})
-    {:noreply, %Log.State{new_state_msg | get_from_id: max_id}}
+    timer_ref = :erlang.send_after(@delay, self(), @query_and_save_msg)
+    {:noreply, %Log.State{new_state_msg | get_from_id: max_id, timer_ref: timer_ref}}
   end
 
   @impl true
   def handle_info(@query_and_save_msg, state) do
     state1 = query_and_save(state)
-    :erlang.send_after(@delay, self(), @query_and_save_msg)
-    {:noreply, state1}
+    timer_ref = :erlang.send_after(@delay, self(), @query_and_save_msg)
+    {:noreply, %Log.State{state1 | timer_ref: timer_ref}}
   end
 
   #API functions

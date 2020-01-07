@@ -11,7 +11,7 @@
      },
      { 
         "who": "dima3",
-        "app": "app2",
+        "app": "app1",
         "component": "client",
         "branch": "branch1",
         "version": 4,
@@ -20,7 +20,7 @@
      },
      { 
         "who": "max2",
-        "app": "app2",
+        "app": "app1",
         "component": "server",
         "branch": "branch0",
         "version": 2,

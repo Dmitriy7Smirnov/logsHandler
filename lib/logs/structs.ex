@@ -8,5 +8,6 @@ defmodule Log.State do
     get_from_id: 0,
     subscriber: :unknown,
     threshold: 0,
-    times: 0
+    times: 0,
+    timer_ref: 0
 end
